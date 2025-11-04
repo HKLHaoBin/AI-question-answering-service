@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -56,34 +57,68 @@ def build_prompt(title: str, options: Optional[List[str]], q_type: Optional[str]
     type_map = {
         "single": "单选题",
         "multiple": "多选题",
-        "judgement": "判断题",
         "completion": "填空题",
     }
-    type_text = type_map.get(q_type or "", "未知类型题目")
+
+    normalized_type = (q_type or "").lower()
+    type_text = type_map.get(normalized_type, "单选题")
+    if normalized_type == "judgement":
+        type_text = "单选题"
 
     if options:
         option_text = "\n".join(o.strip() for o in options)
     else:
         option_text = "（本题无选项，可能是简答或填空题）"
 
-    prompt = f"""
-请根据给出的题目和选项，推理出最合理的答案，并给出详细解析。
-题目类型：{type_text}
+    is_completion = normalized_type == "completion" or not options
 
-题目：
-{title}
+    if is_completion:
+        prompt_lines = [
+            "请根据给出的题目内容，写出最合理的答案，并提供必要的解析。",
+            f"题目类型：{type_text}",
+            "",
+            "题目：",
+            title,
+            "",
+            "选项：",
+            option_text,
+            "",
+            "请严格按下面 JSON 格式返回（不要输出多余文字，不要加注释）：",
+            "{",
+            '  "answer": "完整文字答案",',
+            '  "analysis": "详细解析，说明思路和知识点，仅用于学习和复习"',
+            "}",
+            "附加要求：",
+            "- 这是填空题或无选项题，请输出完整文字答案。",
+            "- analysis 字段必须包含详细解析，说明解题思路和知识点。",
+            "- 答案和解析仅用于学习、复习，不得包含无关内容。",
+        ]
+    else:
+        prompt_lines = [
+            "请根据给出的题目和选项，推理出最合理的答案。",
+            f"题目类型：{type_text}",
+            "",
+            "题目：",
+            title,
+            "",
+            "选项：",
+            option_text,
+            "",
+            "请严格按下面 JSON 格式返回（不要输出多余文字，不要加注释）：",
+            "{",
+            '  "answer": "例如 A 或 AC 或 ABCD",',
+            '  "analysis": "与 answer 完全一致的字符串"',
+            "}",
+            "附加要求：",
+            "- 这是选择题（包括单选、多选、判断），请仅返回选项字母且使用大写字母。",
+            "- 单选题返回一个字母，多选题按字母顺序拼写（例如 AC），如果所有选项都正确，请返回 ABCD（或按实际选项数量的全量字母）。",
+            "- 判断题也仅返回 A 或 B。",
+            "- analysis 字段必须与 answer 完全一致，不允许包含任何其他字符或说明。",
+            "- 不要输出任何解题过程、推理步骤或额外文字。",
+            "- answer 字段不要出现空格、# 号或无关内容。",
+        ]
 
-选项：
-{option_text}
-
-请严格按下面 JSON 格式返回（不要输出多余文字，不要加注释）：
-{{
-  "answer": "例如 A 或 A#C（多选用#分隔，主观题可以用完整文字答案）",
-  "analysis": "详细解析，说明思路和知识点，仅用于学习和复习"
-}}
-    """.strip()
-
-    return prompt
+    return "\n".join(prompt_lines).strip()
 
 
 def parse_model_json(content: str) -> dict:
@@ -142,6 +177,34 @@ def parse_options_query(raw: Optional[str]) -> Optional[List[str]]:
     return [text]
 
 
+OPTION_LABEL_PATTERN = re.compile(r"^\s*([A-Za-z])[\s\.\、,，:：\)\（\(\）]*(.*)$")
+
+
+def build_option_lookup(options: Optional[List[str]]) -> dict:
+    """
+    构建选项字母到选项内容的映射。
+    """
+    lookup = {}
+    if not options:
+        return lookup
+
+    for raw in options:
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if not text:
+            continue
+        match = OPTION_LABEL_PATTERN.match(text)
+        if match:
+            letter = match.group(1).upper()
+            remainder = match.group(2).strip()
+            lookup[letter] = remainder or text
+        else:
+            letter = text[:1].upper()
+            lookup[letter] = text
+    return lookup
+
+
 def process_ai_answer(req: QuestionRequest) -> AiAnswerResponse:
     if SIMPLE_TOKEN and req.token != SIMPLE_TOKEN:
         raise HTTPException(status_code=401, detail="invalid token")
@@ -174,6 +237,38 @@ def process_ai_answer(req: QuestionRequest) -> AiAnswerResponse:
 
     answer = str(parsed.get("answer", "")).strip()
     analysis = str(parsed.get("analysis", "")).strip()
+
+    normalized_type = (req.type or "").lower()
+    is_completion = normalized_type == "completion" or not req.options
+
+    if not answer:
+        raise HTTPException(status_code=500, detail="model returned empty answer")
+
+    if not is_completion:
+        answer_letters = re.findall(r"[A-Za-z]", answer.upper())
+        if not answer_letters:
+            raise HTTPException(status_code=500, detail="model returned invalid answer")
+
+        unique_letters = []
+        for letter in answer_letters:
+            if letter not in unique_letters:
+                unique_letters.append(letter)
+
+        answer = "".join(unique_letters)
+
+        option_lookup = build_option_lookup(req.options)
+        matched_texts = []
+        for letter in unique_letters:
+            option_text = option_lookup.get(letter)
+            if option_text:
+                matched_texts.append(f"{letter}. {option_text}")
+            else:
+                matched_texts.append(letter)
+
+        analysis = "\n".join(matched_texts) if matched_texts else answer
+    else:
+        if not analysis:
+            analysis = "解析略"
 
     data = AiAnswerData(
         question=req.title,
