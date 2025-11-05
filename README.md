@@ -8,7 +8,15 @@
    ```bash
    pip install -r requirements.txt
    ```
-2. 配置环境变量：复制 `.env` 并填写自己的 `OPENAI_API_KEY`，按需调整 `OPENAI_MODEL`、`AI_SIMPLE_TOKEN` 等。
+2. 配置环境变量：创建 `.env` 并填写自己的 `OPENAI_API_KEY`，按需调整 `OPENAI_MODEL`、`AI_SIMPLE_TOKEN` 等。
+   ```ini
+  OPENAI_API_KEY=
+  OPENAI_BASE_URL=https://api.deepseek.com/v1
+  OPENAI_MODEL=deepseek-chat
+  AI_SIMPLE_TOKEN=change-this-token
+
+   ```
+
 3. 启动服务：
    ```bash
    python main.py
