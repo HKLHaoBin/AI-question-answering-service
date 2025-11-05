@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
@@ -65,12 +65,15 @@ def build_prompt(title: str, options: Optional[List[str]], q_type: Optional[str]
     if normalized_type == "judgement":
         type_text = "单选题"
 
-    if options:
-        option_text = "\n".join(o.strip() for o in options)
+    option_entries = extract_option_entries(options, normalized_type)
+    if option_entries:
+        option_text = "\n".join(f"{letter}. {text}" for letter, text in option_entries)
     else:
         option_text = "（本题无选项，可能是简答或填空题）"
 
-    is_completion = normalized_type == "completion" or not options
+    is_completion = normalized_type == "completion" or (
+        normalized_type != "judgement" and not option_entries
+    )
 
     if is_completion:
         prompt_lines = [
@@ -180,29 +183,33 @@ def parse_options_query(raw: Optional[str]) -> Optional[List[str]]:
 OPTION_LABEL_PATTERN = re.compile(r"^\s*([A-Za-z])[\s\.\、,，:：\)\（\(\）]*(.*)$")
 
 
-def build_option_lookup(options: Optional[List[str]]) -> dict:
-    """
-    构建选项字母到选项内容的映射。
-    """
-    lookup = {}
-    if not options:
-        return lookup
+def extract_option_entries(
+    options: Optional[List[str]], normalized_type: str
+) -> List[Tuple[str, str]]:
+    entries: List[Tuple[str, str]] = []
+    if options:
+        seen = set()
+        for idx, raw in enumerate(options):
+            if raw is None:
+                continue
+            text = str(raw).strip()
+            if not text:
+                continue
+            match = OPTION_LABEL_PATTERN.match(text)
+            if match:
+                letter = match.group(1).upper()
+                remainder = match.group(2).strip() or text
+            else:
+                letter = chr(ord("A") + idx)
+                remainder = text
+            if letter not in seen:
+                entries.append((letter, remainder))
+                seen.add(letter)
 
-    for raw in options:
-        if raw is None:
-            continue
-        text = str(raw).strip()
-        if not text:
-            continue
-        match = OPTION_LABEL_PATTERN.match(text)
-        if match:
-            letter = match.group(1).upper()
-            remainder = match.group(2).strip()
-            lookup[letter] = remainder or text
-        else:
-            letter = text[:1].upper()
-            lookup[letter] = text
-    return lookup
+    if not entries and normalized_type == "judgement":
+        entries = [("A", "正确"), ("B", "错误")]
+
+    return entries
 
 
 def process_ai_answer(req: QuestionRequest) -> AiAnswerResponse:
@@ -239,7 +246,10 @@ def process_ai_answer(req: QuestionRequest) -> AiAnswerResponse:
     analysis = str(parsed.get("analysis", "")).strip()
 
     normalized_type = (req.type or "").lower()
-    is_completion = normalized_type == "completion" or not req.options
+    option_entries = extract_option_entries(req.options, normalized_type)
+    is_completion = normalized_type == "completion" or (
+        normalized_type != "judgement" and not option_entries
+    )
 
     if not answer:
         raise HTTPException(status_code=500, detail="model returned empty answer")
@@ -256,7 +266,7 @@ def process_ai_answer(req: QuestionRequest) -> AiAnswerResponse:
 
         answer = "".join(unique_letters)
 
-        option_lookup = build_option_lookup(req.options)
+        option_lookup = {letter: text for letter, text in option_entries}
         matched_texts = []
         for letter in unique_letters:
             option_text = option_lookup.get(letter)

@@ -40,7 +40,23 @@ curl -X POST "http://127.0.0.1:8000/ai-answer" \
 若在 OCS 等平台集成，直接粘贴下面的 JSON 字符串（将 `token` 改成 `.env` 中的 `AI_SIMPLE_TOKEN`，把 `url` 换成实际部署地址即可）。该配置默认使用 GET 请求，`options` 可为 JSON 数组或换行分隔的字符串：
 
 ```json
-{"contentType":"json","data":{"options":"${options}","title":"${title}","token":"change-this-token","type":"${type}"},"handler":"return (res)=>res.code === 1 && res.data ? [res.data.answer,res.data.analysis,{ai: res.data.ai}] : [res.msg || '调用失败', undefined, { ai: false }];","homepage":"http://127.0.0.1:8000/docs","method":"get","name":"本地AI题库","type":"GM_xmlhttpRequest","url":"http://127.0.0.1:8000/ai-answer"}
+[
+    {
+        "contentType": "json",
+        "data": {
+            "options": "${options}",
+            "title": "${title}",
+            "token": "change-this-token",
+            "type": "${type}"
+        },
+        "handler": "return (res)=>res.code === 1 && res.data ? [res.data.answer,res.data.analysis,{ai: res.data.ai}] : [res.msg || '调用失败', undefined, { ai: false }];",
+        "homepage": "http://127.0.0.1:8000/docs",
+        "method": "get",
+        "name": "本地AI题库",
+        "type": "GM_xmlhttpRequest",
+        "url": "http://127.0.0.1:8000/ai-answer"
+    }
+]
 ```
 
 粘贴时请保留为单行 JSON，以满足“格式为 JSON 字符串”要求。
