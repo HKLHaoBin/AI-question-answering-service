@@ -1,2 +1,25 @@
+# ¯ƒØÏ‡ö
 .env
-.env
+.env.local
+.env.production
+
+# Python øs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.coverage
+.pytest_cache/
+.pytest_cache
+
+# IDE øs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# vÖ
+*.log
+.DS_Store
