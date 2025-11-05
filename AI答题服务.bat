@@ -1,3 +1,3 @@
 @echo off
-py backend.py
+py main.py
 pause
